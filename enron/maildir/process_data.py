@@ -17,12 +17,13 @@ with open(LIST) as f:
             file_dic[g.name]['to_list'] = []
             for line in g:
                 tokens = line.split(':')
-                tokens = tokens[:2]
-                # if tokens[0] != 'Date':
-                #     tokens = tokens[:2]
-                # else:
-                #     the_date = tokens[1:]
-                #     tokens[1] = the_date
+                # tokens = tokens[:2]
+                if tokens[0] != 'Date':
+                    tokens = tokens[:2]
+                else:
+                    the_date = ':'.join(tokens[1:])
+                    tokens = [tokens[0], the_date.replace(',','').strip()]
+                    # print tokens
 
                 if re.search('$^', line):
                     d = file_dic[g.name]
@@ -35,7 +36,7 @@ with open(LIST) as f:
                             if to_value:
                                 o.write(common_str + ':' + to_value + ':' + type + '\n')
                     if not len(d['to_list']):
-                        o.write(common_str)
+                        o.write(common_str + '\n')
                     break
                 # print 'tokens[0]: %s' %tokens[0]
                 if re.search('(Date|Cc|Bcc|Message-ID|From|To)$',tokens[0]):

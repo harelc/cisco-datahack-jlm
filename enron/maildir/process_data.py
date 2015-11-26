@@ -1,58 +1,83 @@
+#!/usr/bin/env python
+
+#
+# Writes emails into a csv table with the following fields:
+#
+#   path, date, message-id, from, to, to-type
+#
+# Where 'to-type' is one of 'To', 'Cc', 'Bcc', 'X-To'
+# Currently, 'X-To' is only written to the table for emails that have no 'To',
+# 'Cc' or 'Bcc' field filled in, and that have an 'X-To' to "All Enron
+# Worldwide". 'X-cc' and 'X-bcc' are completely ignored, at the moment, as is
+# 'X-To' if any of the regular "to" fields were filled.
+#
+
+import os
 import re
-import sqlite3
+import argparse
+import email.parser
+import csv
 
-# LIST='test.txt'
-LIST='file_list.txt'
-OUTPUT='output.txt'
-file_dic = {}
-conn = sqlite3.connect('example.db')
-o = open(OUTPUT, 'w')
-with open(LIST) as f:
-    for file_name  in f:
-        print file_name
-        file_name = file_name.strip()
-        if not file_name: break
-        with open(file_name) as g:
-            file_dic[g.name] = {} 
-            file_dic[g.name]['to_list'] = []
-            for line in g:
-                tokens = line.split(':')
-                # tokens = tokens[:2]
-                if tokens[0] != 'Date':
-                    tokens = tokens[:2]
-                else:
-                    the_date = ':'.join(tokens[1:])
-                    tokens = [tokens[0], the_date.replace(',','').strip()]
-                    # print tokens
+def process_mails(outfile, rootdir):
 
-                if re.search('$^', line):
-                    d = file_dic[g.name]
-                    try:
-                        common_str = g.name + ':' + d['Date'] + ':' +  d['Message-ID'] + ':' + d['From']
-                        for i,val_dic in enumerate(d['to_list']):
-                            type = val_dic['type']
-                            value_list = val_dic['val'].split(',')
-                            for j, to_value in enumerate(value_list):
-                                to_value = to_value.strip()
-                                if to_value:
-                                    o.write(common_str + ':' + to_value + ':' + type + '\n')
-                        if not len(d['to_list']):
-                            o.write(common_str + '\n')
-                    except:
-                        pass
-                    finally:
-                        break
-                # print 'tokens[0]: %s' %tokens[0]
-                if re.search('(Date|Cc|Bcc|Message-ID|From|To)$',tokens[0]):
-                    # print 'token is matching, val is %s' %tokens[0]
-                    if re.search('^(To|Cc|Bcc)', tokens[0]):
-                        file_dic[g.name]['to_list'].append({'type':tokens[0], 'val': tokens[1].strip()})
+    count = 0 # for progress reporting...
+    skipped_no_to = 0
+    skipped_x_to = 0
+
+    parser = email.parser.Parser()
+
+    with open(outfile, "wb") as outf:
+        csvwriter = csv.writer(outf)
+        for path, dirs, files in os.walk(rootdir):
+            for fname in files:
+                with open(os.path.join(path, fname)) as f:
+
+                    hdrs = parser.parse(f, True)
+
+                mailpath = os.path.join(path[len(rootdir):], fname)
+
+                outelems = []
+                outelems.append(mailpath)
+                outelems.append(hdrs['Date'])
+                outelems.append(hdrs['Message-ID'])
+                outelems.append(hdrs['From'])
+                # for each of the "to" fields, add a separate row for each
+                # recipient, and the "to-type"
+                written = False
+                for to in ['To', 'Cc', 'Bcc']:
+                    if hdrs[to]:
+                        for rcpt in hdrs[to].split(','):
+                            csvwriter.writerow(outelems + [rcpt.strip(), to])
+                            written = True    
+                if not written:
+                    # is this a company-wide email?
+                    if hdrs['X-to'] and "All Enron Worldwide" in hdrs['X-To']:
+                        csvwriter.writerow(outelems + ['All Enron Worldwide', 'X-To'])
                     else:
-                        try:
-                            file_dic[g.name][tokens[0]] = tokens[1].strip()
-                        except:
-                            pass
-                    continue
+                        if hdrs['X-To'] or hdrs['X-cc'] or hdrs['X-bcc']:
+                            xtos = hdrs['X-To'] + hdrs['X-cc'] + hdrs['X-bcc']
+                            print "Skipping %s, has X-to fields: %s" % (mailpath, xtos)
+                            skipped_x_to += 1
+                        else:
+                            skipped_no_to += 1
 
-o.close()
+                # progress reporting
+                count += 1
+                if count % 100 == 0:
+                    print count, "(skipped: %d,%d)" % (skipped_x_to, skipped_no_to)
+
+def main():
+
+    # handle args
+
+    parser = argparse.ArgumentParser(description='Parse Enron emails into structured csv')
+    parser.add_argument('outfile', type=str, help='name of output file')
+    parser.add_argument('--rootdir', type=str, default='.', help='path to the maildir')
+
+    args = parser.parse_args()
+
+    process_mails(args.outfile, args.rootdir)
+    
+if __name__ == '__main__':
+    main()
 
